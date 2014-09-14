@@ -37,7 +37,8 @@ class Conf(object):
             "desc": "admin test user",
             "role": "admin",
             "hash": "cLzRnzbEwehP6ZzTREh3A4MXJyNo+TV8Hs4//EEbPbiDoo+dmNg22f2RJC282aSwgyWv/O6s3h42qrA6iHx8yfw=",
-            "creation_date": "2012-10-28 20:50:26.286723"
+            "creation_date": "2012-10-28 20:50:26.286723",
+            "last_login": "2014-09-14 12:57:00.000000"
         })
 
         # Create users
