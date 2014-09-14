@@ -61,7 +61,7 @@ class Conf(object):
             #assert isinstance(k, str)
             #assert isinstance(v, dict)
             expected_dkeys = set(('hash', 'email_addr', 'role', 'creation_date',
-                'desc'))
+                'desc', 'last_login'))
             dkeys = set(v.keys())
 
             extra = dkeys - expected_dkeys
