@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Cork - Authentication module for tyyhe Bottle web framework
+# Cork - Authentication module for the Bottle web framework
 # Copyright (C) 2013 Federico Ceratto and others, see AUTHORS file.
 #
 # This package is free software; you can redistribute it and/or
@@ -27,6 +27,7 @@ from smtplib import SMTP, SMTP_SSL
 from threading import Thread
 from time import time
 import bottle
+import flask
 import os
 import re
 import uuid
@@ -51,7 +52,8 @@ class AuthException(AAAException):
     pass
 
 
-class Cork(object):
+class BaseCork(object):
+    """Abstract class"""
 
     def __init__(self, directory=None, backend=None, email_sender=None,
         initialize=False, session_domain=None, smtp_server=None,
@@ -107,11 +109,11 @@ class Cork(object):
                 self._store.users[username]['last_login'] = str(datetime.utcnow())
                 self._store.save_users()
                 if success_redirect:
-                    bottle.redirect(success_redirect)
+                    self._redirect(success_redirect)
                 return True
 
         if fail_redirect:
-            bottle.redirect(fail_redirect)
+            self._redirect(fail_redirect)
 
         return False
 
@@ -128,9 +130,9 @@ class Cork(object):
             session.delete()
         except Exception, e:
             log.debug("Exception %s while logging out." % repr(e))
-            bottle.redirect(fail_redirect)
+            self._redirect(fail_redirect)
 
-        bottle.redirect(success_redirect)
+        self._redirect(success_redirect)
 
     def require(self, username=None, role=None, fixed_role=False,
         fail_redirect=None):
@@ -170,43 +172,46 @@ class Cork(object):
             if fail_redirect is None:
                 raise AuthException("Unauthenticated user")
             else:
-                bottle.redirect(fail_redirect)
+                self._redirect(fail_redirect)
 
         # Authorization
         if cu.role not in self._store.roles:
             raise AAAException("Role not found for the current user")
 
         if username is not None:
-            if username != self.current_user.username:
-                if fail_redirect is None:
-                    raise AuthException("Unauthorized access: incorrect"
-                        " username")
-                else:
-                    bottle.redirect(fail_redirect)
+            # A specific user is required
+            if username == self.current_user.username:
+                return
+
+            if fail_redirect is None:
+                raise AuthException("Unauthorized access: incorrect"
+                    " username")
+
+            self._redirect(fail_redirect)
 
         if fixed_role:
+            # A specific role is required
             if role == self.current_user.role:
                 return
 
             if fail_redirect is None:
                 raise AuthException("Unauthorized access: incorrect role")
-            else:
-                bottle.redirect(fail_redirect)
 
-        else:
-            if role is not None:
-                # Any role with higher level is allowed
-                current_lvl = self._store.roles[self.current_user.role]
-                threshold_lvl = self._store.roles[role]
-                if current_lvl >= threshold_lvl:
-                    return
+            self._redirect(fail_redirect)
 
-                if fail_redirect is None:
-                    raise AuthException("Unauthorized access: ")
-                else:
-                    bottle.redirect(fail_redirect)
+        if role is not None:
+            # Any role with higher level is allowed
+            current_lvl = self._store.roles[self.current_user.role]
+            threshold_lvl = self._store.roles[role]
+            if current_lvl >= threshold_lvl:
+                return
 
-        return
+            if fail_redirect is None:
+                raise AuthException("Unauthorized access: ")
+
+            self._redirect(fail_redirect)
+
+        return  # success
 
     def create_role(self, role, level):
         """Create a new role.
@@ -304,12 +309,12 @@ class Cork(object):
     def list_users(self):
         """List users.
 
-        :return: (username, role, email_addr, description, last_login) generator
-        (sorted by username)
+        :return: (username, role, email_addr, description) generator (sorted by
+            username)
         """
         for un in sorted(self._store.users):
             d = self._store.users[un]
-            yield (un, d['role'], d['email_addr'], d['desc'], d['last_login'])
+            yield (un, d['role'], d['email_addr'], d['desc'])
 
     @property
     def current_user(self):
@@ -468,7 +473,7 @@ class Cork(object):
                 if v['email_addr'] == email_addr:
                     username = k
                     break
-            else:    
+            else:
                 raise AAAException("Email address not found.")
 
         else:  # username is provided
@@ -546,18 +551,14 @@ class Cork(object):
 
     ## Private methods
 
-    @property
-    def _beaker_session(self):
-        """Get Beaker session"""
-        return bottle.request.environ.get('beaker.session')
-
     def _setup_cookie(self, username):
         """Setup cookie for a user that just logged in"""
         session = self._beaker_session
         session['username'] = username
         if self.session_domain is not None:
             session.domain = self.session_domain
-        session.save()
+
+        self._save_session()
 
     def _hash(self, username, pwd, salt=None, algo=None):
         """Hash username and password, generating salt value if required
@@ -640,13 +641,13 @@ class Cork(object):
         :param exp_time: expiration time (hours)
         :type exp_time: float.
         """
-        for uuid, data in self._store.pending_registrations.items():
+        for uuid_code, data in self._store.pending_registrations.items():
             creation = datetime.strptime(data['creation_date'],
                 "%Y-%m-%d %H:%M:%S.%f")
             now = datetime.utcnow()
             maxdelta = timedelta(hours=exp_time)
             if now - creation > maxdelta:
-                self._store.pending_registrations.pop(uuid)
+                self._store.pending_registrations.pop(uuid_code)
 
     def _reset_code(self, username, email_addr):
         """generate a reset_code token
@@ -734,6 +735,39 @@ class User(object):
         self._cork._store.save_users()
 
 
+class Redirect(Exception):
+    pass
+
+def raise_redirect(path):
+    raise Redirect(path)
+
+class Cork(BaseCork):
+    @staticmethod
+    def _redirect(location):
+        bottle.redirect(location)
+
+    @property
+    def _beaker_session(self):
+        """Get Beaker session"""
+        return bottle.request.environ.get('beaker.session')
+
+    def _save_session(self):
+        self._beaker_session.save()
+
+class FlaskCork(BaseCork):
+    @staticmethod
+    def _redirect(location):
+        raise_redirect(location)
+
+    @property
+    def _beaker_session(self):
+        """Get Beaker session"""
+        return flask.session
+
+    def _save_session(self):
+        pass
+
+
 class Mailer(object):
 
     def __init__(self, sender, smtp_url, join_timeout=5):
@@ -819,7 +853,7 @@ class Mailer(object):
         msg['Subject'] = subject
         msg['From'] = self.sender
         msg['To'] = email_addr
-        part = MIMEText(email_text, 'html')
+        part = MIMEText(email_text.encode('utf-8'), 'html')
         msg.attach(part)
 
         log.debug("Sending email using %s" % self._conf['fqdn'])
@@ -873,4 +907,8 @@ class Mailer(object):
 
     def __del__(self):
         """Class destructor: wait for threads to terminate within a timeout"""
-        self.join()
+        try:
+            self.join()
+        except TypeError:
+            pass
+

@@ -54,12 +54,22 @@ pylint:
 
 # target: doc - Build sphinx docs
 doc:
-	cd docs && make html
+	#cd docs && sphinx-build -b html .  _build/html
+	sphinx-build -b html docs  docs/_build/html
 
 # target: docwithcoverage - Build sphinx docs
 docwithcoverage: coverage doc
 
 # target: rsync - Build docs with coverage and publish them
 rsync: build docwithcoverage
-	echo rsync -avz _build/html/ firelet.net:~/websites/$(PROJ)
+	cd docs && rsync -avz _build/html/ firelet.net:~/websites/$(PROJ)
+
+# target: targeted-coverage - Run per-backend coverage tests
+targeted-coverage:
+	nosetests tests/test_functional_mongodb_instance.py --with-coverage --cover-erase --cover-package=cork.mongodb_backend
+	nosetests tests/test_functional_mysql_instance.py --with-coverage --cover-erase --cover-package=cork.sqlalchemy_backend
+	nosetests tests/test_functional_sqlalchemy_sqlite_in_memory.py --with-coverage --cover-erase --cover-package=cork.sqlalchemy_backend
+	nosetests tests/test_functional_json.py --with-coverage --cover-erase --cover-package=cork.json_backend
+	nosetests tests/test_sqlite.py --with-coverage --cover-erase --cover-package=cork.sqlite_backend
+
 
